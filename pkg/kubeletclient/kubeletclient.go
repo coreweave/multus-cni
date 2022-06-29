@@ -3,6 +3,7 @@ package kubeletclient
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"golang.org/x/net/context"
@@ -90,10 +91,14 @@ func (rc *kubeletClient) GetPodResourceMap(pod *v1.Pod) (map[string]*types.Resou
 		if pr.Name == name && pr.Namespace == ns {
 			for _, cnt := range pr.Containers {
 				for _, dev := range cnt.Devices {
+					logging.Debugf("kubeletClient GetPodResourceMap devices %+v", dev)
 					if rInfo, ok := resourceMap[dev.ResourceName]; ok {
 						rInfo.DeviceIDs = append(rInfo.DeviceIDs, dev.DeviceIds...)
+						sort.Strings(rInfo.DeviceIDs)
 					} else {
-						resourceMap[dev.ResourceName] = &types.ResourceInfo{DeviceIDs: dev.DeviceIds}
+						deviceIDs := dev.DeviceIds
+						sort.Strings(deviceIDs)
+						resourceMap[dev.ResourceName] = &types.ResourceInfo{DeviceIDs: deviceIDs}
 					}
 				}
 			}

@@ -18,6 +18,7 @@ package checkpoint
 import (
 	"encoding/json"
 	"io/ioutil"
+	"sort"
 
 	"gopkg.in/intel/multus-cni.v3/pkg/logging"
 	"gopkg.in/intel/multus-cni.v3/pkg/types"
@@ -100,9 +101,12 @@ func (cp *checkpoint) GetPodResourceMap(pod *v1.Pod) (map[string]*types.Resource
 			if ok {
 				// already exists; append to it
 				entry.DeviceIDs = append(entry.DeviceIDs, pod.DeviceIDs...)
+				sort.Strings(entry.DeviceIDs)
 			} else {
 				// new entry
-				resourceMap[pod.ResourceName] = &types.ResourceInfo{DeviceIDs: pod.DeviceIDs}
+				deviceIDs := pod.DeviceIDs
+				sort.Strings(deviceIDs)
+				resourceMap[pod.ResourceName] = &types.ResourceInfo{DeviceIDs: deviceIDs}
 			}
 		}
 	}
