@@ -1,0 +1,32 @@
+branches:
+- coreweave
+preset: "angular"
+tagFormat: "v${version}-cw"
+plugins:
+- "@semantic-release/commit-analyzer"
+- "@semantic-release/exec"
+repositoryUrl: "git@github.com:coreweave/multus-cni.git"
+analyzeCommits:
+- path: "@semantic-release/commit-analyzer"
+  releaseRules:
+  - type: "feature"
+    release: "minor"
+  - type: "update"
+    release: "minor"
+  - type: "refactor"
+    release: "patch"
+  - type: "fix"
+    release: "patch"
+  - type: "docs"
+    release: "patch"
+  parserOpts:
+    noteKeywords:
+    - "BREAKING CHANGE"
+    - "BREAKING CHANGES"
+prepare:
+- path: "@semantic-release/exec"
+  prepareCmd: |-
+    export RELEASE_IMAGE=$CI_REGISTRY_IMAGE/multus-cni:v${nextRelease.version}-cw && 
+    /kaniko/executor $KANIKO_ADDTL_ARGS --context . --dockerfile $DOCKERFILE --destination $RELEASE_IMAGE &&
+    apk add git nodejs npm
+    
