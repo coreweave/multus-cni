@@ -1,4 +1,4 @@
-image: registry.gitlab.com/coreweave/utility-images/kaniko-alpine:v1.0.5
+image: registry.gitlab.com/coreweave/utility-images/kaniko-alpine:v1.0.7
 
 default:
   tags:
