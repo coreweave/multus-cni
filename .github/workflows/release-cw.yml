@@ -1,0 +1,103 @@
+name: Release, Build & Push (CoreWeave)
+
+# CoreWeave release pipeline for the multus-cni fork — replaces the GitLab CI
+# build (.gitlab-ci.yml, kaniko). Builds deployments/Dockerfile and publishes the
+# governed image to Artifactory via OIDC (no static secrets, no GitLab).
+#
+# Onboarded to ACP via .cw/artifact-mgmt/config.yaml, which provisions the
+# cw-multus-cni-oci repo (cw project). Images land in cw-multus-cni-oci-prod-local
+# and are consumed via images.coreweave.com/cw-multus-cni-oci/multus-cni:<tag>.
+#
+# PHASED COEXISTENCE: the GitLab CI build (.gitlab-ci.yml + .releaserc kaniko) is
+# kept as-is for now and remains the authoritative release. This workflow runs
+# semantic-release in DRY-RUN purely to read the computed version (it does NOT run
+# the .releaserc kaniko prepare), then mirrors the build into the governed
+# Artifactory repo. Once this governed build is validated, remove .gitlab-ci.yml and
+# switch this workflow to the authoritative release (dry-run: false, trim .releaserc).
+#
+# Tag scheme preserved from .releaserc.yaml: v<version>-cw.
+
+on:
+  push:
+    branches:
+      - coreweave
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write    # @actions/checkout + semantic-release git tag
+  id-token: write    # OIDC (Artifactory + GitHub)
+  packages: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release-build-and-push:
+    name: Release, Build & Push multus-cni
+    runs-on: cw-org
+    container: docker.artifacts.coreweave.com/cw-github-actions-images-oci/github-semantic-release:v1.21.0
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Semantic Release (compute version + tag)
+        id: semantic-release
+        uses: coreweave/actions/release/semantic-release@semantic-release-action-v1.13.0
+        with:
+          working-directory: .
+          monorepo: false
+          # Dry-run: compute the version only. GitLab CI remains the authoritative
+          # release until .gitlab-ci.yml is removed. Dry-run skips the .releaserc
+          # kaniko prepare step, so the two builds do not conflict.
+          dry-run: true
+
+      - name: Get GitHub OIDC Token
+        id: oidc-github-token
+        uses: coreweave/actions/tools/oidc/github-token@get-oidc-github-token-v1.0.0
+        with:
+          audience: "${{ github.server_url }}/${{ github.repository_owner }}"
+
+      - name: Setup JFrog CLI (Artifactory OIDC)
+        id: setup-jfrog-cli
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.ARTIFACTORY_INSTANCE_URL }}
+          JF_PROJECT: ${{ vars.ARTIFACTORY_PROJECT_KEY }}
+        with:
+          oidc-provider-name: ${{ vars.ARTIFACTORY_OIDC_PROVIDER_NAME }}
+          oidc-audience: ${{ vars.ARTIFACTORY_OIDC_AUDIENCE }}
+
+      - name: Construct Tags
+        id: construct-tags
+        env:
+          VERSION: ${{ steps.semantic-release.outputs.version }}
+          SR_TAG: ${{ steps.semantic-release.outputs.tag }}
+        run: |
+          # Build/push only when semantic-release computes a release-worthy version.
+          if [[ -z "${VERSION}" ]]; then
+            echo "No release-worthy change; skipping governed build/push."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAG="${SR_TAG:-v${VERSION}-cw}"
+          DEST="coreweave.jfrog.io/cw-multus-cni-oci-prod-local/multus-cni"
+          {
+            echo 'tags<<EOF'
+              echo "${DEST}:${TAG}"
+              echo "${DEST}:${{ github.sha }}"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build & Push Image (buildx)
+        if: ${{ steps.construct-tags.outputs.publish == 'true' }}
+        uses: coreweave/actions/build/buildx-build@buildx-build-action-v1.3.0
+        with:
+          context: .
+          file: deployments/Dockerfile
+          platforms: linux/amd64
+          tags: ${{ steps.construct-tags.outputs.tags }}
